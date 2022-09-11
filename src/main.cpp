@@ -1,183 +1,161 @@
-/*-
- * Copyright 2021 The OpenSSL Project Authors. All Rights Reserved.
- *
- * Licensed under the Apache License 2.0 (the "License").  You may not use
- * this file except in compliance with the License.  You can obtain a copy
- * in the file LICENSE in the source distribution or at
- * https://www.openssl.org/source/license.html
- */
-
-/*
- * An example that uses EVP_PKEY_encrypt and EVP_PKEY_decrypt methods
- * to encrypt and decrypt data using an RSA keypair.
- * RSA encryption produces different encrypted output each time it is run,
- * hence this is not a known answer test.
- */
-
 #include <iostream>
+#include <string>
+#include <memory>
+#include <limits>
+#include <stdexcept>
 
 #include <openssl/evp.h>
+#include <openssl/rand.h>
 
-/* 定义算法名称 */
-#define ALGO_NAME "RSA"
+static const unsigned int KEY_SIZE = 32;
+static const unsigned int BLOCK_SIZE = 16;
 
-/* 定义缓冲区长度 */
-#define DATA_BUF_LEN 1024
+template <typename T>
+struct zallocator
+{
+public:
+    typedef T value_type;
+    typedef value_type* pointer;
+    typedef const value_type* const_pointer;
+    typedef value_type& reference;
+    typedef const value_type& const_reference;
+    typedef std::size_t size_type;
+    typedef std::ptrdiff_t difference_type;
 
-/* 全局缓冲区 */
-static unsigned char DATA_BUF[DATA_BUF_LEN] = { 0 };
+    pointer address (reference v) const {return &v;}
+    const_pointer address (const_reference v) const {return &v;}
 
-/* 定义二进制数据块 */
-struct BIN_DATA {
-    unsigned char *data; /* 数据首地址 */
-    size_t len;          /* 数据长度（字节） */
+    pointer allocate (size_type n, const void* hint = 0) {
+        if (n > std::numeric_limits<size_type>::max() / sizeof(T))
+            throw std::bad_alloc();
+        return static_cast<pointer> (::operator new (n * sizeof (value_type)));
+    }
+
+    void deallocate(pointer p, size_type n) {
+        OPENSSL_cleanse(p, n*sizeof(T));
+        ::operator delete(p); 
+    }
+    
+    size_type max_size() const {
+        return std::numeric_limits<size_type>::max() / sizeof (T);
+    }
+    
+    template<typename U>
+    struct rebind
+    {
+        typedef zallocator<U> other;
+    };
+
+    void construct (pointer ptr, const T& val) {
+        new (static_cast<T*>(ptr) ) T (val);
+    }
+
+    void destroy(pointer ptr) {
+        static_cast<T*>(ptr)->~T();
+    }
+
+#if __cpluplus >= 201103L
+    template<typename U, typename... Args>
+    void construct (U* ptr, Args&&  ... args) {
+        ::new (static_cast<void*> (ptr) ) U (std::forward<Args> (args)...);
+    }
+
+    template<typename U>
+    void destroy(U* ptr) {
+        ptr->~U();
+    }
+#endif
 };
 
-/* 非对称加密 */
-int asym_encrypt(EVP_PKEY_CTX *ctx, struct BIN_DATA *in, struct BIN_DATA *enc)
+typedef unsigned char byte;
+typedef std::basic_string<char, std::char_traits<char>, zallocator<char> > secure_string;
+using EVP_CIPHER_CTX_free_ptr = std::unique_ptr<EVP_CIPHER_CTX, decltype(&::EVP_CIPHER_CTX_free)>;
+
+void gen_params(byte key[KEY_SIZE], byte iv[BLOCK_SIZE]);
+void aes_encrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secure_string& ptext, secure_string& ctext);
+void aes_decrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secure_string& ctext, secure_string& rtext);
+
+// g++ -Wall -std=c++11 evp-encrypt.cxx -o evp-encrypt.exe -lcrypto
+int main(int argc, char* argv[])
 {
-    size_t blen = 0;
+    // Load the necessary cipher
+    EVP_add_cipher(EVP_aes_256_cbc());
 
-    if (!ctx || !in || !enc) {
-        return 0;
-    }
+    // plaintext, ciphertext, recovered text
+    secure_string ptext = "Now is the time for all good men to come to the aide of their country";
+    secure_string ctext, rtext;
 
-    /* 先获取加密缓冲区大小 */
-    if (EVP_PKEY_encrypt(ctx, NULL, &blen, in->data, in->len) != 1) {
-        return 0;
-    }
+    byte key[KEY_SIZE], iv[BLOCK_SIZE];
+    gen_params(key, iv);
+  
+    aes_encrypt(key, iv, ptext, ctext);
+    aes_decrypt(key, iv, ctext, rtext);
+    
+    OPENSSL_cleanse(key, KEY_SIZE);
+    OPENSSL_cleanse(iv, BLOCK_SIZE);
 
-    if (blen > enc->len) {
-        std::cout << "缓冲区不足！";
-        return 0;
-    }
+    std::cout << "Original message:\n" << ptext << std::endl;
+    std::cout << "Recovered message:\n" << rtext << std::endl;
 
-    /* 非对称加密 */
-    if (EVP_PKEY_encrypt(ctx, enc->data, &enc->len, in->data, in->len) != 1) {
-        return 0;
-    }
-    return 1;
-}
-
-/* 非对称解密 */
-int asym_decrypt(EVP_PKEY_CTX *ctx, struct BIN_DATA *enc, struct BIN_DATA *dec)
-{
-    size_t blen = 0;
-
-    if (!ctx || !enc || !dec) {
-        return 0;
-    }
-
-    /* 先获取加密缓冲区大小 */
-    if (EVP_PKEY_decrypt(ctx, NULL, &blen, enc->data, enc->len) != 1) {
-        return 0;
-    }
-
-    if (blen > dec->len) {
-         std::cout <<"缓冲区不足！";
-        return 0;
-    }
-
-    /* 非对称解密 */
-    if (EVP_PKEY_decrypt(ctx, dec->data, &dec->len, enc->data, enc->len) != 1) {
-        return 0;
-    }
-    return 1;
-}
-
-/* Openssl 这个版本暂时没有实现高层次 api 对 SM2_3 的支持，所以这里用 RSA 算法做演示 */
-int main(int argc, char *argv[]) 
-{
-    EVP_PKEY_CTX *ectx = NULL;
-    EVP_PKEY_CTX *dctx = NULL;
-
-    /* 定义原文 */
-    char data[] = "12345678901234567890abcdefgABCDEFGIOPBNM12356789";
-    int len = sizeof(data);
-
-    /* 原文数据 */
-    struct BIN_DATA in = {
-        (unsigned char *)data,
-        (size_t)len
-    };
-
-    /* 加密缓冲区 */
-    struct BIN_DATA enc = {
-        DATA_BUF,
-        DATA_BUF_LEN / 2
-    };
-
-    /* 解密缓冲区 */
-    struct BIN_DATA dec = {
-        DATA_BUF + DATA_BUF_LEN / 2,
-        DATA_BUF_LEN / 2
-    };
-
-    /* 首先生成非对称**对 */
-    EVP_PKEY *pair = EVP_PKEY_Q_keygen(NULL, NULL, ALGO_NAME, 2048);
-
-    if (!pair) {
-         std::cout <<"生成**失败";
-        return 0;
-    }
-
-    /* 获取非对称算法上下文 */
-    ectx = EVP_PKEY_CTX_new_from_pkey(NULL, pair, NULL);
-    if (!ectx) {
-         std::cout << "生成非对称算法上下文失败";
-        goto end;
-    }
-
-    /* 加密前初始化上下文 */
-    if (EVP_PKEY_encrypt_init_ex(ectx, NULL) != 1) {
-         std::cout <<"初始化非对称算法上下文失败";
-        goto end;
-    }
-
-    /* 加密 */
-    if (asym_encrypt(ectx, &in, &enc) != 1) {
-         std::cout <<"加密失败";
-        goto end;
-    }
-
-    dctx = EVP_PKEY_CTX_new_from_pkey(NULL, pair, NULL);
-    if (!dctx) {
-         std::cout <<"生成非对称算法上下文失败";
-        goto end;
-    }
-
-    /* 解密前初始化上下文 */
-    if (EVP_PKEY_decrypt_init_ex(dctx, NULL) != 1) {
-         std::cout <<"初始化非对称算法上下文失败";
-        goto end;
-    }
-
-    /* 解密 */
-    if (asym_decrypt(dctx, &enc, &dec) != 1) {
-         std::cout <<"解密失败";
-        goto end;
-    }
-
-    /* 打印信息 */
-
-    /* 打印原文数据 */
-     std::cout <<"原文数据" << in.data << in.len << std::endl;
-
-    /* 打印加密数据 */
-     std::cout <<"加密数据" << enc.data << enc.len<< std::endl;
-
-    /* 打印解密数据 */
-     std::cout <<"解密数据" << dec.data << dec.len<< std::endl;
-
-end:
-    if (dctx) {
-        EVP_PKEY_CTX_free(dctx);
-    }
-
-    if (ectx) {
-        EVP_PKEY_CTX_free(ectx);
-    }
-
-    EVP_PKEY_free(pair);
+    std::cin.get();
     return 0;
+}
+
+void gen_params(byte key[KEY_SIZE], byte iv[BLOCK_SIZE])
+{
+    int rc = RAND_bytes(key, KEY_SIZE);
+    if (rc != 1)
+      throw std::runtime_error("RAND_bytes key failed");
+
+    rc = RAND_bytes(iv, BLOCK_SIZE);
+    if (rc != 1)
+      throw std::runtime_error("RAND_bytes for iv failed");
+}
+
+void aes_encrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secure_string& ptext, secure_string& ctext)
+{
+    EVP_CIPHER_CTX_free_ptr ctx(EVP_CIPHER_CTX_new(), ::EVP_CIPHER_CTX_free);
+    int rc = EVP_EncryptInit_ex(ctx.get(), EVP_aes_256_cbc(), NULL, key, iv);
+    if (rc != 1)
+      throw std::runtime_error("EVP_EncryptInit_ex failed");
+
+    // Recovered text expands upto BLOCK_SIZE
+    ctext.resize(ptext.size()+BLOCK_SIZE);
+    int out_len1 = (int)ctext.size();
+
+    rc = EVP_EncryptUpdate(ctx.get(), (byte*)&ctext[0], &out_len1, (const byte*)&ptext[0], (int)ptext.size());
+    if (rc != 1)
+      throw std::runtime_error("EVP_EncryptUpdate failed");
+  
+    int out_len2 = (int)ctext.size() - out_len1;
+    rc = EVP_EncryptFinal_ex(ctx.get(), (byte*)&ctext[0]+out_len1, &out_len2);
+    if (rc != 1)
+      throw std::runtime_error("EVP_EncryptFinal_ex failed");
+
+    // Set cipher text size now that we know it
+    ctext.resize(out_len1 + out_len2);
+}
+
+void aes_decrypt(const byte key[KEY_SIZE], const byte iv[BLOCK_SIZE], const secure_string& ctext, secure_string& rtext)
+{
+    EVP_CIPHER_CTX_free_ptr ctx(EVP_CIPHER_CTX_new(), ::EVP_CIPHER_CTX_free);
+    int rc = EVP_DecryptInit_ex(ctx.get(), EVP_aes_256_cbc(), NULL, key, iv);
+    if (rc != 1)
+      throw std::runtime_error("EVP_DecryptInit_ex failed");
+
+    // Recovered text contracts upto BLOCK_SIZE
+    rtext.resize(ctext.size());
+    int out_len1 = (int)rtext.size();
+
+    rc = EVP_DecryptUpdate(ctx.get(), (byte*)&rtext[0], &out_len1, (const byte*)&ctext[0], (int)ctext.size());
+    if (rc != 1)
+      throw std::runtime_error("EVP_DecryptUpdate failed");
+  
+    int out_len2 = (int)rtext.size() - out_len1;
+    rc = EVP_DecryptFinal_ex(ctx.get(), (byte*)&rtext[0]+out_len1, &out_len2);
+    if (rc != 1)
+      throw std::runtime_error("EVP_DecryptFinal_ex failed");
+
+    // Set recovered text size now that we know it
+    rtext.resize(out_len1 + out_len2);
 }

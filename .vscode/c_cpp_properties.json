@@ -4,7 +4,7 @@
             "name": "Win32",
             "includePath": [
                 "${workspaceFolder}/**",
-                "D:/Code Projects/cpp-libraries/openssl-installation/include/**"
+                "D:/Code Projects/cpp-libraries/openssl-v3.0.5-x86_64-posix-seh-rev0-8.1.0/include/**"
             ],
             "defines": [
                 "_DEBUG",

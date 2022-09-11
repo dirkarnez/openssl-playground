@@ -15,7 +15,12 @@ D:\Softwares\x86_64-8.1.0-release-posix-seh-rt_v6-rev0\mingw64;^
 D:\Softwares\x86_64-8.1.0-release-posix-seh-rt_v6-rev0\mingw64\bin;^
 D:\Softwares\cmake-3.23.0-rc1-windows-x86_64\bin;
 
-cmake.exe -G"MinGW Makefiles" -DOPENSSL_ROOT="D:/Code Projects/cpp-libraries/openssl-installation" -DCMAKE_BUILD_TYPE=Debug -B./build &&^
+rmdir build
+
+cmake.exe -G"MinGW Makefiles" ^
+-DOpenSSL_DIR="D:/Code Projects/cpp-libraries/openssl-v3.0.5-x86_64-posix-seh-rev0-8.1.0" ^
+-DCMAKE_BUILD_TYPE=Debug ^
+-B./build &&^
 cd build &&^
 cmake --build . &&^
 echo "Successful build"
