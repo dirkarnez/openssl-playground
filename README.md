@@ -6,3 +6,6 @@ From official example [EVP Symmetric Encryption and Decryption - OpenSSLWiki](ht
 ### Using
 - [dirkarnez/openssl-prebuilt](https://github.com/dirkarnez/openssl-prebuilt)
     - Put `openssl-config.cmake` to `OpenSSL_DIR`
+ 
+### Notes
+- CMake built-in FindOpenSSL seems find OpenSSL by `OPENSSL_ROOT_DIR`, not tested
