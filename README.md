@@ -9,3 +9,6 @@ From official example [EVP Symmetric Encryption and Decryption - OpenSSLWiki](ht
  
 ### Notes
 - CMake built-in FindOpenSSL seems find OpenSSL by `OPENSSL_ROOT_DIR`, not tested
+
+### Examples
+- [DaveGamble/soundcloud-c-api-wrapper: A lightweight C wrapper for the SoundCloud API](https://github.com/DaveGamble/soundcloud-c-api-wrapper/tree/master)
